@@ -11,13 +11,17 @@ The first implementation manages one safe, visible controller setting: the RS-23
 - Network access to the CHAZY Control Pro
 - CHAZY SSH enabled
 
-Install the Python dependency:
+Create a project virtual environment and install the dependencies. This avoids
+the `externally-managed-environment` restriction used by current Homebrew Python:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -r requirements.txt
+python3 -m pip install ansible
 ```
 
-If your Ansible installation uses a virtual environment, install `paramiko` into that same environment.
+Keep the virtual environment active while running the playbook.
 
 ## Run
 
@@ -68,4 +72,3 @@ ansible-playbook -i inventory.yml site.yml -e chazy_rs232_baud=57600
 - No passwords are committed to this repository.
 - `vault.yml` is ignored if Ansible Vault variables are added later.
 - Host-key verification is handled by Paramiko for this initial local proof-of-concept. Production deployments should pin and verify the controller host key.
-
