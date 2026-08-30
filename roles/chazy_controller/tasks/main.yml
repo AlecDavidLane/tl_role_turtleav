@@ -26,7 +26,9 @@
   environment:
     CHAZY_PASSWORD: "{{ chazy_password }}"
   register: chazy_result
-  changed_when: (chazy_result.stdout | from_json).changed | bool
+  changed_when: >-
+    chazy_result.rc == 0 and
+    ((chazy_result.stdout | from_json).get('changed', false) | bool)
   failed_when: chazy_result.rc != 0
 
 - name: Report verified CHAZY configuration
@@ -38,4 +40,3 @@
       after_baud: "{{ (chazy_result.stdout | from_json).after_baud }}"
       changed: "{{ (chazy_result.stdout | from_json).changed }}"
       verified: "{{ (chazy_result.stdout | from_json).verified }}"
-
