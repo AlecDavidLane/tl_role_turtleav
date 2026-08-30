@@ -1,0 +1,41 @@
+---
+- name: Validate requested CHAZY baud rate
+  ansible.builtin.assert:
+    that:
+      - chazy_rs232_baud | int in [115200, 57600, 38400, 19200, 9600]
+    fail_msg: >-
+      chazy_rs232_baud must be one of 115200, 57600, 38400, 19200 or 9600.
+
+- name: Query, configure and verify CHAZY controller
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ role_path }}/files/chazy_cli.py"
+      - --host
+      - "{{ chazy_host }}"
+      - --port
+      - "{{ chazy_port | string }}"
+      - --username
+      - "{{ chazy_username }}"
+      - --desired-baud
+      - "{{ chazy_rs232_baud | string }}"
+      - --connect-timeout
+      - "{{ chazy_connect_timeout | string }}"
+      - --command-timeout
+      - "{{ chazy_command_timeout | string }}"
+  environment:
+    CHAZY_PASSWORD: "{{ chazy_password }}"
+  register: chazy_result
+  changed_when: (chazy_result.stdout | from_json).changed | bool
+  failed_when: chazy_result.rc != 0
+
+- name: Report verified CHAZY configuration
+  ansible.builtin.debug:
+    msg:
+      controller: "{{ chazy_host }}"
+      firmware: "{{ (chazy_result.stdout | from_json).firmware }}"
+      before_baud: "{{ (chazy_result.stdout | from_json).before_baud }}"
+      after_baud: "{{ (chazy_result.stdout | from_json).after_baud }}"
+      changed: "{{ (chazy_result.stdout | from_json).changed }}"
+      verified: "{{ (chazy_result.stdout | from_json).verified }}"
+
