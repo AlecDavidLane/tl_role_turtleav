@@ -26,6 +26,7 @@ except ImportError:
 
 PROMPT = b"CONTROLLER>"
 BAUD_TO_INDEX = {115200: 0, 57600: 1, 38400: 2, 19200: 3, 9600: 4}
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 class ChazyError(RuntimeError):
@@ -55,13 +56,33 @@ def send_command(channel, command: str, timeout: float) -> str:
 
 
 def parse_status(response: str) -> tuple[int, str]:
-    baud_match = re.search(r"\b(On|Off)\s+(On|Off)\s+(115200|57600|38400|19200|9600)\b", response)
+    normalized = ANSI_ESCAPE.sub("", response).replace("\x00", "")
+    # Firmware versions have no five-digit integer, so matching any supported
+    # baud value is both safer and more tolerant of firmware-specific spacing.
+    baud_match = re.search(r"(?<!\d)(115200|57600|38400|19200|9600)(?!\d)", normalized)
     if not baud_match:
-        raise ChazyError("Could not parse RS-232 baud rate from GET STATUS response")
+        compact = " ".join(normalized.split())
+        raise ChazyError(
+            f"Could not parse RS-232 baud rate from GET STATUS response: {compact[:1000]!r}"
+        )
 
-    firmware_match = re.search(r"FW Version:\s*([0-9.]+)", response)
+    firmware_match = re.search(r"FW Version:\s*([0-9.]+)", normalized)
     firmware = firmware_match.group(1) if firmware_match else "unknown"
-    return int(baud_match.group(3)), firmware
+    return int(baud_match.group(1)), firmware
+
+
+def query_status(channel, timeout: float, attempts: int = 3) -> tuple[int, str]:
+    last_error: ChazyError | None = None
+    for attempt in range(attempts):
+        response = send_command(channel, "GET STATUS", timeout)
+        try:
+            return parse_status(response)
+        except ChazyError as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(0.3)
+    assert last_error is not None
+    raise last_error
 
 
 def configure(args: argparse.Namespace) -> dict[str, object]:
@@ -81,16 +102,14 @@ def configure(args: argparse.Namespace) -> dict[str, object]:
         channel.invoke_shell()
         receive_until(channel, PROMPT, args.command_timeout)
 
-        initial_status = send_command(channel, "GET STATUS", args.command_timeout)
-        before_baud, firmware = parse_status(initial_status)
+        before_baud, firmware = query_status(channel, args.command_timeout)
         changed = before_baud != args.desired_baud
 
         if changed:
             command = f"SET RS232BAUDRATE {BAUD_TO_INDEX[args.desired_baud]}"
             send_command(channel, command, args.command_timeout)
 
-        final_status = send_command(channel, "GET STATUS", args.command_timeout)
-        after_baud, final_firmware = parse_status(final_status)
+        after_baud, final_firmware = query_status(channel, args.command_timeout)
         verified = after_baud == args.desired_baud
         if not verified:
             raise ChazyError(
@@ -133,4 +152,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
