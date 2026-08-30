@@ -1,0 +1,11 @@
+---
+chazy_host: "192.168.6.160"
+chazy_port: 22
+chazy_username: "admin"
+
+# Supported values: 115200, 57600, 38400, 19200, 9600
+chazy_rs232_baud: 38400
+
+chazy_connect_timeout: 10
+chazy_command_timeout: 10
+
