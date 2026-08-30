@@ -1,0 +1,13 @@
+---
+- name: Deploy Turtle AV CHAZY Controller role
+  hosts: localhost
+  gather_facts: false
+
+  vars_prompt:
+    - name: chazy_password
+      prompt: CHAZY admin password
+      private: true
+
+  roles:
+    - role: chazy_controller
+
