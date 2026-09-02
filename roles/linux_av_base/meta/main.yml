@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  role_name: linux_av_base
+  author: Transition Layer
+  description: Stable Ubuntu 24.04 base configuration for dedicated AV endpoints
+  license: proprietary
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+

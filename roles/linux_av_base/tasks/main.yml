@@ -1,0 +1,193 @@
+---
+- name: Validate supported operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version('24.04', '>=')
+      - ansible_service_mgr == "systemd"
+    fail_msg: >-
+      linux_av_base supports Ubuntu 24.04 or later using systemd. Detected
+      {{ ansible_distribution }} {{ ansible_distribution_version }} with
+      {{ ansible_service_mgr }}.
+
+- name: Validate role variables
+  ansible.builtin.assert:
+    that:
+      - linux_av_base_operator_user | length > 0
+      - linux_av_base_operator_user is match('^[a-z_][a-z0-9_-]*$')
+      - linux_av_base_timezone | length > 0
+    fail_msg: "Set a valid operator username and timezone."
+
+- name: Set machine hostname
+  ansible.builtin.hostname:
+    name: "{{ linux_av_base_hostname }}"
+  when: linux_av_base_hostname | length > 0
+
+- name: Read current system timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: linux_av_base_current_timezone
+  changed_when: false
+
+- name: Set system timezone
+  ansible.builtin.command: "timedatectl set-timezone {{ linux_av_base_timezone }}"
+  when: linux_av_base_current_timezone.stdout != linux_av_base_timezone
+  changed_when: true
+
+- name: Install AV base packages
+  ansible.builtin.apt:
+    name: "{{ linux_av_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure SSH is enabled
+  ansible.builtin.systemd_service:
+    name: ssh
+    enabled: true
+    state: started
+
+- name: Create AV operator account
+  ansible.builtin.user:
+    name: "{{ linux_av_base_operator_user }}"
+    comment: "{{ linux_av_base_operator_name }}"
+    groups: "{{ linux_av_base_operator_groups | join(',') }}"
+    append: true
+    create_home: true
+    shell: /bin/bash
+    password_lock: true
+
+- name: Create Transition Layer directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ linux_av_base_directories }}"
+
+- name: Check that GDM is installed when autologin is requested
+  ansible.builtin.stat:
+    path: /etc/gdm3
+  register: linux_av_base_gdm
+  when: linux_av_base_enable_autologin | bool
+
+- name: Require Ubuntu Desktop for autologin
+  ansible.builtin.assert:
+    that:
+      - linux_av_base_gdm.stat.isdir | default(false)
+    fail_msg: >-
+      GDM was not found. Install Ubuntu Desktop or set
+      linux_av_base_enable_autologin: false for a headless machine.
+  when: linux_av_base_enable_autologin | bool
+
+- name: Configure GDM autologin and Xorg
+  ansible.builtin.template:
+    src: gdm-custom.conf.j2
+    dest: /etc/gdm3/custom.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: linux_av_base_enable_autologin | bool
+  notify: Reboot required
+
+- name: Create dconf policy directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/dconf/profile
+    - /etc/dconf/db/local.d/locks
+
+- name: Install system dconf profile
+  ansible.builtin.copy:
+    content: |
+      user-db:user
+      system-db:local
+    dest: /etc/dconf/profile/user
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf database
+
+- name: Configure unattended kiosk desktop settings
+  ansible.builtin.template:
+    src: 00-av-kiosk.j2
+    dest: /etc/dconf/db/local.d/00-av-kiosk
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf database
+
+- name: Prevent changes to critical kiosk settings
+  ansible.builtin.copy:
+    content: |
+      /org/gnome/desktop/session/idle-delay
+      /org/gnome/desktop/screensaver/lock-enabled
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+    dest: /etc/dconf/db/local.d/locks/00-av-kiosk
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Update dconf database
+
+- name: Disable automatic apt activity during shows
+  ansible.builtin.copy:
+    content: |
+      APT::Periodic::Enable "0";
+      APT::Periodic::Update-Package-Lists "0";
+      APT::Periodic::Unattended-Upgrade "0";
+    dest: /etc/apt/apt.conf.d/99-transition-layer-show-machine
+    owner: root
+    group: root
+    mode: "0644"
+  when: linux_av_base_disable_automatic_updates | bool
+
+- name: Allow normal automatic apt policy when requested
+  ansible.builtin.file:
+    path: /etc/apt/apt.conf.d/99-transition-layer-show-machine
+    state: absent
+  when: not (linux_av_base_disable_automatic_updates | bool)
+
+- name: Disable system sleep targets
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  loop:
+    - sleep.target
+    - suspend.target
+    - hibernate.target
+    - hybrid-sleep.target
+  when: linux_av_base_disable_sleep | bool
+
+- name: Enable system sleep targets when requested
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - sleep.target
+    - suspend.target
+    - hibernate.target
+    - hybrid-sleep.target
+  when: not (linux_av_base_disable_sleep | bool)
+
+- name: Apply pending configuration handlers before validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Gather service state for validation
+  ansible.builtin.service_facts:
+
+- name: Gather local account database for validation
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Validate AV base deployment
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services['ssh.service'].state == 'running'
+      - linux_av_base_operator_user in ansible_facts.getent_passwd
+    success_msg: "Ubuntu AV base configuration validated successfully."
+    fail_msg: "Ubuntu AV base validation failed. Review the preceding task output."

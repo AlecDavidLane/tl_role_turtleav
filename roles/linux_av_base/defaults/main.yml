@@ -1,0 +1,45 @@
+---
+# Identity
+linux_av_base_hostname: ""
+linux_av_base_timezone: Europe/London
+
+# Local account used by the presentation and backup applications.
+linux_av_base_operator_user: avoperator
+linux_av_base_operator_name: AV Operator
+linux_av_base_operator_groups:
+  - audio
+  - video
+linux_av_base_enable_autologin: true
+
+# A show machine should not suspend, lock, blank its display, or install updates
+# unexpectedly. Set either option to false when a site policy manages it instead.
+linux_av_base_disable_sleep: true
+linux_av_base_disable_automatic_updates: true
+
+linux_av_base_packages:
+  - ca-certificates
+  - curl
+  - dconf-cli
+  - jq
+  - openssh-server
+  - python3
+  - rsync
+  - unzip
+
+linux_av_base_directories:
+  - path: /opt/transition-layer
+    owner: root
+    group: root
+    mode: "0755"
+  - path: /var/lib/transition-layer
+    owner: root
+    group: root
+    mode: "0755"
+  - path: /var/log/transition-layer
+    owner: root
+    group: root
+    mode: "0755"
+  - path: /srv/media
+    owner: "{{ linux_av_base_operator_user }}"
+    group: "{{ linux_av_base_operator_user }}"
+    mode: "0755"
